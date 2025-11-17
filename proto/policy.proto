@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package llmpolicy;
+
+// Policy Service
+service PolicyService {
+  // Policy Management
+  rpc CreatePolicy(CreatePolicyRequest) returns (CreatePolicyResponse);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse);
+  rpc UpdatePolicy(UpdatePolicyRequest) returns (UpdatePolicyResponse);
+  rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse);
+  rpc ListPolicies(ListPoliciesRequest) returns (ListPoliciesResponse);
+
+  // Policy Evaluation
+  rpc EvaluatePolicy(EvaluatePolicyRequest) returns (EvaluatePolicyResponse);
+  rpc EvaluatePolicyStream(stream EvaluatePolicyRequest) returns (stream EvaluatePolicyResponse);
+}
+
+// Messages
+message Policy {
+  PolicyMetadata metadata = 1;
+  repeated PolicyRule rules = 2;
+  string status = 3;
+}
+
+message PolicyMetadata {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  string version = 4;
+  string namespace = 5;
+  repeated string tags = 6;
+  int32 priority = 7;
+  string created_at = 8;
+  string updated_at = 9;
+  string created_by = 10;
+}
+
+message PolicyRule {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  Condition condition = 4;
+  Action action = 5;
+  bool enabled = 6;
+}
+
+message Condition {
+  string operator = 1;
+  string field = 2;
+  string value = 3;
+  repeated Condition conditions = 4;
+}
+
+message Action {
+  string decision = 1;
+  string reason = 2;
+  map<string, string> metadata = 3;
+  map<string, string> modifications = 4;
+}
+
+message EvaluationContext {
+  LLMContext llm = 1;
+  UserContext user = 2;
+  TeamContext team = 3;
+  ProjectContext project = 4;
+  RequestContext request = 5;
+  map<string, string> metadata = 6;
+}
+
+message LLMContext {
+  string provider = 1;
+  string model = 2;
+  string prompt = 3;
+  int32 max_tokens = 4;
+  double temperature = 5;
+}
+
+message UserContext {
+  string id = 1;
+  string email = 2;
+  repeated string roles = 3;
+  repeated string permissions = 4;
+}
+
+message TeamContext {
+  string id = 1;
+  string name = 2;
+  string tier = 3;
+}
+
+message ProjectContext {
+  string id = 1;
+  string name = 2;
+  string environment = 3;
+}
+
+message RequestContext {
+  string id = 1;
+  int64 timestamp = 2;
+  string ip_address = 3;
+  string user_agent = 4;
+}
+
+message PolicyDecision {
+  string decision = 1;
+  bool allowed = 2;
+  string reason = 3;
+  repeated string matched_policies = 4;
+  repeated string matched_rules = 5;
+  int64 evaluation_time_ms = 6;
+  map<string, string> modifications = 7;
+  map<string, string> metadata = 8;
+}
+
+// Request/Response Messages
+message CreatePolicyRequest {
+  Policy policy = 1;
+  string created_by = 2;
+}
+
+message CreatePolicyResponse {
+  Policy policy = 1;
+}
+
+message GetPolicyRequest {
+  string id = 1;
+}
+
+message GetPolicyResponse {
+  Policy policy = 1;
+  bool cached = 2;
+}
+
+message UpdatePolicyRequest {
+  string id = 1;
+  Policy policy = 2;
+}
+
+message UpdatePolicyResponse {
+  Policy policy = 1;
+}
+
+message DeletePolicyRequest {
+  string id = 1;
+}
+
+message DeletePolicyResponse {
+  bool success = 1;
+}
+
+message ListPoliciesRequest {
+  string namespace = 1;
+  string status = 2;
+  int32 limit = 3;
+  int32 offset = 4;
+}
+
+message ListPoliciesResponse {
+  repeated Policy policies = 1;
+  int32 total = 2;
+}
+
+message EvaluatePolicyRequest {
+  string request_id = 1;
+  EvaluationContext context = 2;
+  repeated string policy_ids = 3;
+  bool trace = 4;
+  bool dry_run = 5;
+}
+
+message EvaluatePolicyResponse {
+  string request_id = 1;
+  PolicyDecision decision = 2;
+  int64 timestamp = 3;
+  bool cached = 4;
+}

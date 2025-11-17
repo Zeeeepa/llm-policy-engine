@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: llm-policy-postgres
+    environment:
+      POSTGRES_DB: llm_policy_engine
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: llm-policy-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-policy-api
+    command: ["node", "dist/api/server.js"]
+    ports:
+      - "3000:3000"
+      - "9090:9090"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/llm_policy_engine
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+      CACHE_ENABLED: "true"
+      JWT_SECRET: dev-secret-key
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  grpc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: llm-policy-grpc
+    command: ["node", "dist/grpc/server.js"]
+    ports:
+      - "50051:50051"
+    environment:
+      NODE_ENV: development
+      GRPC_PORT: 50051
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/llm_policy_engine
+      REDIS_URL: redis://redis:6379
+      LOG_LEVEL: info
+      CACHE_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

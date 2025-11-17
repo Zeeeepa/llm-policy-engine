@@ -1,0 +1,100 @@
+# Cost Management Policy Example
+# Enforces cost controls and budget limits
+
+metadata:
+  id: cost-001
+  name: Cost Management Policy
+  description: Enforces cost controls and prevents budget overruns
+  version: "1.0.0"
+  namespace: cost
+  tags:
+    - cost
+    - budget
+    - optimization
+  priority: 80
+
+status: active
+
+rules:
+  # Rule 1: Block expensive models for non-production
+  - id: cost-001-r1
+    name: Block Expensive Models in Dev/Test
+    description: Prevent use of expensive models in non-production environments
+    enabled: true
+    condition:
+      operator: and
+      conditions:
+        - operator: ne
+          field: project.environment
+          value: production
+        - operator: in
+          field: llm.model
+          value:
+            - gpt-4
+            - claude-opus-3
+            - claude-3-opus-20240229
+    action:
+      decision: deny
+      reason: "Expensive models are not allowed in non-production environments"
+      metadata:
+        severity: medium
+        category: cost-control
+        suggestion: "Use gpt-3.5-turbo or claude-sonnet instead"
+
+  # Rule 2: Warn on high estimated cost
+  - id: cost-001-r2
+    name: Warn on High Cost
+    description: Warn when estimated cost exceeds threshold
+    enabled: true
+    condition:
+      operator: gt
+      field: llm.estimatedCost
+      value: 1.0
+    action:
+      decision: warn
+      reason: "Estimated cost exceeds $1.00 per request"
+      metadata:
+        severity: medium
+        category: cost-alert
+
+  # Rule 3: Limit token usage
+  - id: cost-001-r3
+    name: Limit Max Tokens
+    description: Enforce maximum token limits
+    enabled: true
+    condition:
+      operator: gt
+      field: llm.maxTokens
+      value: 8000
+    action:
+      decision: modify
+      reason: "Maximum tokens reduced to stay within limits"
+      modifications:
+        llm.maxTokens: 8000
+      metadata:
+        severity: low
+        category: cost-optimization
+
+  # Rule 4: Team tier-based model access
+  - id: cost-001-r4
+    name: Enforce Team Tier Limits
+    description: Restrict model access based on team subscription tier
+    enabled: true
+    condition:
+      operator: and
+      conditions:
+        - operator: eq
+          field: team.tier
+          value: free
+        - operator: in
+          field: llm.model
+          value:
+            - gpt-4
+            - claude-opus-3
+    action:
+      decision: deny
+      reason: "Your team tier does not include access to premium models"
+      metadata:
+        severity: high
+        category: subscription-limit
+        upgradeUrl: "https://llm-devops.io/pricing"

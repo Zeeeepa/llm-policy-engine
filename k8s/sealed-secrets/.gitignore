@@ -1,0 +1,132 @@
+# Sealed Secrets Directory .gitignore
+# This file prevents accidental commits of plain secrets and sensitive credentials
+# while allowing sealed secrets and templates that are safe to version control
+
+# ============================================================================
+# Plain Secrets - NEVER COMMIT
+# ============================================================================
+# Environment configuration files with unencrypted secrets
+.env
+.env.local
+.env.*.local
+.env.dev
+.env.staging
+.env.production
+*.env
+*.env.*
+
+# YAML secret files (non-sealed, non-template)
+# Allow: *-sealed.yaml, *-template.yaml, examples
+secret*.yaml
+*secret.yaml
+!*-sealed.yaml
+!*-template.yaml
+!*-example.yaml
+!*-example*.yaml
+
+# ============================================================================
+# Cryptographic Keys and Certificates
+# ============================================================================
+# Private keys that should never be committed
+*.pem
+*.key
+*-key.pem
+*-private.pem
+private-key
+rsa_key
+id_rsa
+id_ecdsa
+
+# Public certificates downloaded locally (use sealed-secrets public cert instead)
+pub-cert.pem
+cert.pem
+certificate.pem
+
+# PKCS12 and other key store formats
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# ============================================================================
+# Sensitive Data Files
+# ============================================================================
+# JSON secret files
+secrets.json
+*-secrets.json
+credentials.json
+config-secrets.json
+
+# SQL dumps and database files
+*.sql
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files that may contain secrets
+*.backup
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*~
+.backup
+
+# ============================================================================
+# Temporary and Build Artifacts
+# ============================================================================
+# Script execution artifacts
+*.log
+*.tmp
+*.temp
+temp/
+tmp/
+.tmp/
+
+# Node/npm artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ============================================================================
+# IDE and Editor Files
+# ============================================================================
+.vscode/
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# ============================================================================
+# Build and Distribution Artifacts
+# ============================================================================
+dist/
+build/
+out/
+.next/
+.nuxt/
+coverage/
+
+# ============================================================================
+# Safe Files (Whitelisted) - These ARE allowed in git
+# ============================================================================
+# Note: Use !pattern to explicitly allow files
+# Sealed secrets are safe - they contain encrypted data
+!manifests/
+!manifests/*.yaml
+!templates/
+!templates/*.yaml
+!examples/
+!examples/*.yaml
+!*.example
+!*.example.*

@@ -1,0 +1,468 @@
+# Budget Policy
+# Cost management and budget enforcement for LLM operations
+
+version: "1.0"
+metadata:
+  name: "budget-policy"
+  namespace: "production"
+  description: "Budget and cost control policy for LLM operations"
+  tags:
+    - budget
+    - cost-control
+    - quota-management
+  created_at: "2025-11-17T00:00:00Z"
+  updated_at: "2025-11-17T00:00:00Z"
+  revision: 1
+  owner: "finance-team@example.com"
+
+config:
+  default_action: allow
+  fail_open: false
+  audit_all_decisions: true
+  cache_ttl_seconds: 60  # Shorter TTL for budget checks
+
+rules:
+  # ============================================================================
+  # Hard Budget Limits (Priority 100)
+  # ============================================================================
+
+  - id: "enforce-monthly-budget-hard-limit"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "budget-enforcement"
+    conditions:
+      match: |
+        user.budget.monthly_spent >= user.budget.monthly_limit
+    actions:
+      - type: deny
+        reason: "Monthly budget limit reached"
+        metadata:
+          monthly_limit: "{{ user.budget.monthly_limit }}"
+          monthly_spent: "{{ user.budget.monthly_spent }}"
+          reset_date: "{{ user.budget.reset_date }}"
+      - type: suggest_alternative
+        message: "Consider using a cheaper model or wait until budget resets"
+      - type: audit
+        severity: high
+
+  - id: "enforce-daily-budget-hard-limit"
+    priority: 99
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "budget-enforcement"
+    conditions:
+      match: |
+        user.budget.daily_spent >= user.budget.daily_limit
+    actions:
+      - type: deny
+        reason: "Daily budget limit reached"
+        metadata:
+          daily_limit: "{{ user.budget.daily_limit }}"
+          daily_spent: "{{ user.budget.daily_spent }}"
+      - type: audit
+        severity: medium
+
+  - id: "enforce-team-budget"
+    priority: 98
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "budget-enforcement"
+    conditions:
+      match: |
+        team.budget.monthly_spent + request.estimated_cost > team.budget.monthly_limit
+    actions:
+      - type: deny
+        reason: "Team budget limit exceeded"
+        metadata:
+          team_id: "{{ user.team }}"
+          team_limit: "{{ team.budget.monthly_limit }}"
+          team_spent: "{{ team.budget.monthly_spent }}"
+      - type: audit
+        severity: high
+        alert: true
+
+  # ============================================================================
+  # Per-Request Cost Limits (Priority 90-95)
+  # ============================================================================
+
+  - id: "enforce-max-request-cost"
+    priority: 95
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "cost-limit"
+    conditions:
+      match: |
+        request.estimated_cost > user.limits.max_request_cost
+    actions:
+      - type: deny
+        reason: "Request cost exceeds maximum allowed"
+        metadata:
+          max_allowed: "{{ user.limits.max_request_cost }}"
+          estimated_cost: "{{ request.estimated_cost }}"
+      - type: suggest_alternative
+        model: "gpt-3.5-turbo"
+      - type: audit
+        severity: medium
+
+  - id: "enforce-premium-model-cost"
+    priority: 94
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "cost-limit"
+    conditions:
+      match: |
+        request.model in ['gpt-4', 'claude-3-opus'] &&
+        request.estimated_cost > 1.0 &&
+        user.tier != 'premium'
+    actions:
+      - type: deny
+        reason: "High-cost premium model request requires premium tier"
+        metadata:
+          model: "{{ request.model }}"
+          estimated_cost: "{{ request.estimated_cost }}"
+      - type: suggest_alternative
+        models: ["gpt-3.5-turbo", "claude-3-haiku"]
+
+  # ============================================================================
+  # Budget Warnings (Priority 80-89)
+  # ============================================================================
+
+  - id: "warn-approaching-monthly-budget-90"
+    priority: 88
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "budget-warning"
+    conditions:
+      match: |
+        user.budget.monthly_spent + request.estimated_cost > user.budget.monthly_limit * 0.9 &&
+        user.budget.monthly_spent < user.budget.monthly_limit * 0.9
+    actions:
+      - type: allow
+      - type: warn
+        message: "Warning: 90% of monthly budget consumed"
+        metadata:
+          percentage: "90"
+          remaining: "{{ user.budget.monthly_limit - user.budget.monthly_spent }}"
+      - type: audit
+        severity: medium
+
+  - id: "warn-approaching-monthly-budget-75"
+    priority: 87
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "budget-warning"
+    conditions:
+      match: |
+        user.budget.monthly_spent + request.estimated_cost > user.budget.monthly_limit * 0.75 &&
+        user.budget.monthly_spent < user.budget.monthly_limit * 0.75
+    actions:
+      - type: allow
+      - type: warn
+        message: "Warning: 75% of monthly budget consumed"
+      - type: audit
+        severity: low
+
+  - id: "warn-approaching-daily-budget"
+    priority: 86
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "budget-warning"
+    conditions:
+      match: |
+        user.budget.daily_spent + request.estimated_cost > user.budget.daily_limit * 0.8
+    actions:
+      - type: allow
+      - type: warn
+        message: "Warning: Approaching daily budget limit"
+      - type: audit
+        severity: low
+
+  # ============================================================================
+  # Token Quota Management (Priority 70-79)
+  # ============================================================================
+
+  - id: "enforce-monthly-token-quota"
+    priority: 78
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "quota-enforcement"
+    conditions:
+      match: |
+        user.quota.tokens_used + request.estimated_tokens > user.quota.tokens_monthly
+    actions:
+      - type: deny
+        reason: "Monthly token quota exceeded"
+        metadata:
+          quota: "{{ user.quota.tokens_monthly }}"
+          used: "{{ user.quota.tokens_used }}"
+          requested: "{{ request.estimated_tokens }}"
+      - type: audit
+        severity: medium
+
+  - id: "enforce-token-limit-per-request"
+    priority: 77
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "quota-enforcement"
+    conditions:
+      match: |
+        request.estimated_tokens > user.limits.max_tokens_per_request
+    actions:
+      - type: deny
+        reason: "Request exceeds maximum token limit"
+        metadata:
+          max_tokens: "{{ user.limits.max_tokens_per_request }}"
+          requested_tokens: "{{ request.estimated_tokens }}"
+
+  # ============================================================================
+  # Cost Optimization (Priority 60-69)
+  # ============================================================================
+
+  - id: "suggest-cheaper-model-for-simple-tasks"
+    priority: 68
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "cost-optimization"
+    conditions:
+      match: |
+        request.model == 'gpt-4' &&
+        request.estimated_tokens < 500 &&
+        !request.tags.contains('complex')
+    actions:
+      - type: allow
+      - type: warn
+        message: "Consider using gpt-3.5-turbo for this simple task to save costs"
+      - type: suggest_alternative
+        model: "gpt-3.5-turbo"
+        metadata:
+          potential_savings: "{{ request.estimated_cost * 0.9 }}"
+
+  - id: "suggest-caching-for-repeated-queries"
+    priority: 67
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "cost-optimization"
+    conditions:
+      match: |
+        request.prompt in user.recent_prompts &&
+        !request.context.cache_disabled
+    actions:
+      - type: allow
+      - type: warn
+        message: "This query was recently executed. Consider caching results."
+      - type: audit
+        severity: low
+        metadata:
+          optimization: "caching-opportunity"
+
+  # ============================================================================
+  # CostOps Integration (Priority 50-59)
+  # ============================================================================
+
+  - id: "costops-budget-check"
+    priority: 58
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "integration"
+      integration: "llm-costops"
+    conditions:
+      match: |
+        costops.check_budget(user.id, request.estimated_cost).within_budget == false
+    actions:
+      - type: deny
+        reason: "CostOps budget check failed"
+        metadata:
+          remaining: "{{ costops.check_budget(user.id, request.estimated_cost).remaining }}"
+          requested: "{{ request.estimated_cost }}"
+      - type: suggest_alternative
+        model: "{{ costops.suggest_cheaper_model(request.model) }}"
+
+  - id: "costops-estimate-verification"
+    priority: 57
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "integration"
+    conditions:
+      match: |
+        abs(request.estimated_cost - costops.estimate_cost(request.model, request.estimated_tokens).total) > 0.1
+    actions:
+      - type: allow
+      - type: warn
+        message: "Cost estimate discrepancy detected"
+      - type: audit
+        severity: medium
+        metadata:
+          client_estimate: "{{ request.estimated_cost }}"
+          server_estimate: "{{ costops.estimate_cost(request.model, request.estimated_tokens).total }}"
+
+  # ============================================================================
+  # Time-Based Budget Controls (Priority 40-49)
+  # ============================================================================
+
+  - id: "restrict-expensive-models-outside-business-hours"
+    priority: 48
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "time-based"
+    conditions:
+      match: |
+        request.model in ['gpt-4', 'claude-3-opus'] &&
+        (now().hour < 9 || now().hour >= 17) &&
+        user.tier == 'basic' &&
+        request.estimated_cost > 0.5
+    actions:
+      - type: deny
+        reason: "Expensive models restricted outside business hours for basic tier"
+      - type: suggest_alternative
+        models: ["gpt-3.5-turbo", "claude-3-haiku"]
+        metadata:
+          available_after: "09:00 local time"
+
+  - id: "weekend-budget-limit"
+    priority: 47
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "time-based"
+    conditions:
+      match: |
+        now().weekday() >= 5 &&  # Saturday or Sunday
+        request.estimated_cost > 2.0 &&
+        user.tier != 'premium'
+    actions:
+      - type: deny
+        reason: "Weekend spending limit for non-premium users"
+      - type: suggest_alternative
+        message: "Consider waiting until Monday or upgrading to premium tier"
+
+  # ============================================================================
+  # Budget Allocation by Use Case (Priority 30-39)
+  # ============================================================================
+
+  - id: "development-vs-production-budget"
+    priority: 38
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "allocation"
+    conditions:
+      match: |
+        request.context.environment == 'development' &&
+        user.budget.dev_spent + request.estimated_cost > user.budget.dev_limit
+    actions:
+      - type: deny
+        reason: "Development budget limit reached"
+        metadata:
+          dev_limit: "{{ user.budget.dev_limit }}"
+          dev_spent: "{{ user.budget.dev_spent }}"
+          prod_available: "{{ user.budget.prod_limit - user.budget.prod_spent }}"
+
+  - id: "experimentation-budget"
+    priority: 37
+    enabled: true
+    metadata:
+      severity: "low"
+      category: "allocation"
+    conditions:
+      match: |
+        request.tags.contains('experiment') &&
+        user.budget.experiment_spent + request.estimated_cost > user.budget.experiment_limit
+    actions:
+      - type: deny
+        reason: "Experimentation budget exhausted"
+      - type: audit
+        severity: low
+
+  # ============================================================================
+  # Chargebacks and Cost Attribution (Priority 20-29)
+  # ============================================================================
+
+  - id: "record-chargeback"
+    priority: 28
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "chargeback"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          user_id: "{{ user.id }}"
+          team_id: "{{ user.team }}"
+          cost_center: "{{ user.cost_center }}"
+          estimated_cost: "{{ request.estimated_cost }}"
+          model: "{{ request.model }}"
+          project: "{{ request.context.project }}"
+
+  # ============================================================================
+  # Default Allow (Priority 0)
+  # ============================================================================
+
+  - id: "default-allow-within-budget"
+    priority: 0
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "default"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          cost: "{{ request.estimated_cost }}"
+          tokens: "{{ request.estimated_tokens }}"
+
+# ============================================================================
+# Exception Handling
+# ============================================================================
+
+exceptions:
+  - id: "emergency-spending-override"
+    enabled: false
+    conditions:
+      match: |
+        request.context.emergency == true &&
+        user.role in ['admin', 'finance-approver']
+    action: allow_all
+    audit: true
+    requires_approval: true
+
+  - id: "vip-user-bypass"
+    enabled: true
+    conditions:
+      match: |
+        user.tier == 'enterprise' &&
+        user.unlimited_budget == true
+    action: allow_all
+    audit: true
+
+# ============================================================================
+# Fallback Behavior
+# ============================================================================
+
+fallback:
+  action: deny
+  reason: "Budget evaluation failed - denying for safety"
+  audit: true
+  alert: true

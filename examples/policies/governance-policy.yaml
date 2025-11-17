@@ -1,0 +1,554 @@
+# Governance Policy
+# Audit, compliance, and governance controls for LLM operations
+
+version: "1.0"
+metadata:
+  name: "governance-policy"
+  namespace: "production"
+  description: "Governance, audit, and compliance policy for LLM operations"
+  tags:
+    - governance
+    - audit
+    - compliance
+    - reporting
+  created_at: "2025-11-17T00:00:00Z"
+  updated_at: "2025-11-17T00:00:00Z"
+  revision: 1
+  owner: "governance-team@example.com"
+
+config:
+  default_action: allow
+  fail_open: false
+  audit_all_decisions: true
+  cache_ttl_seconds: 0  # Don't cache governance decisions
+
+rules:
+  # ============================================================================
+  # High-Risk Operations (Priority 100)
+  # ============================================================================
+
+  - id: "audit-high-risk-operations"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "high-risk"
+      compliance: ["SOC2", "ISO27001"]
+    conditions:
+      match: |
+        request.tags.contains('high-risk') ||
+        request.tags.contains('production-data') ||
+        request.tags.contains('customer-data')
+    actions:
+      - type: allow
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          risk_level: "high"
+          requires_review: true
+          reviewer_group: "risk-management"
+      - type: log
+        level: warning
+
+  - id: "require-approval-for-sensitive-models"
+    priority: 99
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "approval-required"
+    conditions:
+      match: |
+        request.model in ['gpt-4-32k', 'claude-3-opus'] &&
+        !request.context.has_approval
+    actions:
+      - type: deny
+        reason: "Approval required for sensitive model usage"
+      - type: audit
+        severity: high
+        metadata:
+          approval_status: "pending"
+          approver_group: "model-governance"
+
+  # ============================================================================
+  # Data Classification (Priority 90-95)
+  # ============================================================================
+
+  - id: "audit-public-data"
+    priority: 95
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "data-classification"
+      data_class: "public"
+    conditions:
+      match: |
+        request.data_classification == 'public'
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          data_classification: "public"
+          retention_period: "90-days"
+
+  - id: "audit-internal-data"
+    priority: 94
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "data-classification"
+      data_class: "internal"
+    conditions:
+      match: |
+        request.data_classification == 'internal'
+    actions:
+      - type: allow
+      - type: audit
+        severity: medium
+        metadata:
+          data_classification: "internal"
+          retention_period: "180-days"
+          requires_encryption: true
+
+  - id: "audit-confidential-data"
+    priority: 93
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "data-classification"
+      data_class: "confidential"
+    conditions:
+      match: |
+        request.data_classification == 'confidential'
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        alert: true
+        metadata:
+          data_classification: "confidential"
+          retention_period: "365-days"
+          requires_encryption: true
+          access_restricted: true
+
+  - id: "audit-restricted-data"
+    priority: 92
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "data-classification"
+      data_class: "restricted"
+    conditions:
+      match: |
+        request.data_classification == 'restricted'
+    actions:
+      - type: allow
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          data_classification: "restricted"
+          retention_period: "indefinite"
+          requires_encryption: true
+          access_restricted: true
+          requires_approval: true
+
+  # ============================================================================
+  # Compliance Frameworks (Priority 80-89)
+  # ============================================================================
+
+  - id: "gdpr-compliance-audit"
+    priority: 88
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      framework: "GDPR"
+    conditions:
+      match: |
+        user.region in ['EU', 'UK'] ||
+        request.data_subject_region in ['EU', 'UK']
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        metadata:
+          compliance_framework: "GDPR"
+          data_subject_rights: "applicable"
+          lawful_basis: "{{ request.context.lawful_basis }}"
+          data_retention: "{{ request.context.retention_period }}"
+
+  - id: "ccpa-compliance-audit"
+    priority: 87
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      framework: "CCPA"
+    conditions:
+      match: |
+        user.region == 'California' ||
+        request.data_subject_region == 'California'
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        metadata:
+          compliance_framework: "CCPA"
+          consumer_rights: "applicable"
+          do_not_sell: "{{ request.context.do_not_sell }}"
+
+  - id: "hipaa-compliance-audit"
+    priority: 86
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "compliance"
+      framework: "HIPAA"
+    conditions:
+      match: |
+        request.tags.contains('healthcare') ||
+        contains_phi(request.prompt)
+    actions:
+      - type: allow
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          compliance_framework: "HIPAA"
+          phi_present: true
+          baa_required: true
+          encryption_required: true
+
+  - id: "sox-compliance-audit"
+    priority: 85
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      framework: "SOX"
+    conditions:
+      match: |
+        request.tags.contains('financial') ||
+        request.tags.contains('sox-controlled')
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        alert: true
+        metadata:
+          compliance_framework: "SOX"
+          financial_impact: true
+          segregation_of_duties: "{{ user.sox_compliant }}"
+
+  # ============================================================================
+  # User Activity Monitoring (Priority 70-79)
+  # ============================================================================
+
+  - id: "monitor-admin-activity"
+    priority: 78
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "activity-monitoring"
+    conditions:
+      match: |
+        user.role in ['admin', 'superuser']
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        metadata:
+          privileged_user: true
+          activity_type: "privileged-access"
+
+  - id: "monitor-unusual-activity"
+    priority: 77
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "anomaly-detection"
+    conditions:
+      match: |
+        request.estimated_cost > user.typical_cost * 10 ||
+        request.estimated_tokens > user.typical_tokens * 10
+    actions:
+      - type: allow
+      - type: warn
+        message: "Unusual activity detected"
+      - type: audit
+        severity: medium
+        alert: true
+        metadata:
+          anomaly_type: "cost-spike"
+          typical_cost: "{{ user.typical_cost }}"
+          current_cost: "{{ request.estimated_cost }}"
+
+  - id: "monitor-off-hours-access"
+    priority: 76
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "activity-monitoring"
+    conditions:
+      match: |
+        (now().hour < 6 || now().hour >= 22) &&
+        !user.authorized_off_hours
+    actions:
+      - type: allow
+      - type: audit
+        severity: medium
+        metadata:
+          access_time: "off-hours"
+          timestamp: "{{ now() }}"
+
+  # ============================================================================
+  # Model Usage Tracking (Priority 60-69)
+  # ============================================================================
+
+  - id: "track-model-usage"
+    priority: 68
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "usage-tracking"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          model: "{{ request.model }}"
+          tokens: "{{ request.estimated_tokens }}"
+          cost: "{{ request.estimated_cost }}"
+          user_id: "{{ user.id }}"
+          team: "{{ user.team }}"
+          project: "{{ request.context.project }}"
+
+  - id: "track-premium-model-usage"
+    priority: 67
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "usage-tracking"
+    conditions:
+      match: |
+        request.model in ['gpt-4', 'gpt-4-32k', 'claude-3-opus']
+    actions:
+      - type: allow
+      - type: audit
+        severity: medium
+        metadata:
+          model_tier: "premium"
+          justification: "{{ request.context.justification }}"
+
+  # ============================================================================
+  # Integration Auditing (Priority 50-59)
+  # ============================================================================
+
+  - id: "governance-integration-log"
+    priority: 58
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "integration"
+      integration: "llm-governance"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          governance_dashboard: true
+          event_type: "llm-request"
+
+  # ============================================================================
+  # Data Retention (Priority 40-49)
+  # ============================================================================
+
+  - id: "apply-retention-policy-public"
+    priority: 48
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "data-retention"
+    conditions:
+      match: |
+        request.data_classification == 'public'
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          retention_period: "90-days"
+          deletion_date: "{{ now().add_days(90) }}"
+
+  - id: "apply-retention-policy-confidential"
+    priority: 47
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "data-retention"
+    conditions:
+      match: |
+        request.data_classification in ['confidential', 'restricted']
+    actions:
+      - type: allow
+      - type: audit
+        severity: medium
+        metadata:
+          retention_period: "365-days"
+          deletion_date: "{{ now().add_days(365) }}"
+          legal_hold: "{{ request.context.legal_hold }}"
+
+  # ============================================================================
+  # Access Logging (Priority 30-39)
+  # ============================================================================
+
+  - id: "log-all-access"
+    priority: 38
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "access-logging"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          access_type: "llm-api"
+          user_id: "{{ user.id }}"
+          user_role: "{{ user.role }}"
+          user_team: "{{ user.team }}"
+          ip_address: "{{ request.context.ip_address }}"
+          user_agent: "{{ request.context.user_agent }}"
+          session_id: "{{ request.context.session_id }}"
+      - type: log
+        level: info
+
+  - id: "log-sensitive-access"
+    priority: 37
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "access-logging"
+    conditions:
+      match: |
+        request.tags.contains('sensitive') ||
+        request.data_classification in ['confidential', 'restricted']
+    actions:
+      - type: allow
+      - type: audit
+        severity: high
+        alert: true
+        metadata:
+          access_type: "sensitive-data"
+          requires_review: true
+
+  # ============================================================================
+  # Reporting (Priority 20-29)
+  # ============================================================================
+
+  - id: "daily-usage-report"
+    priority: 28
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "reporting"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          report_type: "daily-usage"
+          aggregation_key: "{{ user.team }}-{{ now().format('YYYY-MM-DD') }}"
+
+  - id: "compliance-report"
+    priority: 27
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "reporting"
+    conditions:
+      match: |
+        request.tags.any(tag => tag.starts_with('compliance-'))
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          report_type: "compliance"
+          framework: "{{ request.tags }}"
+
+  # ============================================================================
+  # Change Tracking (Priority 10-19)
+  # ============================================================================
+
+  - id: "track-policy-changes"
+    priority: 18
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "change-tracking"
+    conditions:
+      match: |
+        request.context.policy_change == true
+    actions:
+      - type: allow
+      - type: audit
+        severity: medium
+        metadata:
+          change_type: "policy-update"
+          changed_by: "{{ user.id }}"
+          change_reason: "{{ request.context.change_reason }}"
+
+  # ============================================================================
+  # Default Allow with Audit (Priority 0)
+  # ============================================================================
+
+  - id: "default-allow-with-audit"
+    priority: 0
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "default"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+        metadata:
+          decision: "default-allow"
+
+# ============================================================================
+# Exception Handling
+# ============================================================================
+
+exceptions:
+  - id: "audit-bypass-emergency"
+    enabled: false
+    conditions:
+      match: |
+        request.context.emergency == true &&
+        user.role == 'incident-commander'
+    action: allow_all
+    audit: true
+    requires_approval: false
+
+# ============================================================================
+# Fallback Behavior
+# ============================================================================
+
+fallback:
+  action: allow
+  reason: "Governance evaluation failed - allowing with audit"
+  audit: true
+  alert: true

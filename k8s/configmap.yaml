@@ -1,0 +1,75 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: llm-policy-engine-config
+  namespace: llm-devops
+  labels:
+    app: llm-policy-engine
+data:
+  log-level: "info"
+  cache-enabled: "true"
+  cache-ttl: "300"
+  cache-max-size: "10000"
+  rate-limit-window-ms: "60000"
+  rate-limit-max-requests: "100"
+  max-policy-size-mb: "10"
+  max-evaluation-time-ms: "100"
+  enable-parallel-evaluation: "true"
+  trace-enabled: "true"
+  metrics-port: "9090"
+  metrics-path: "/metrics"
+
+  # Integration URLs (optional)
+  llm-shield-url: ""
+  llm-costops-url: ""
+  llm-governance-url: ""
+  llm-edge-agent-url: ""
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-policy-engine-secrets
+  namespace: llm-devops
+  labels:
+    app: llm-policy-engine
+type: Opaque
+stringData:
+  database-url: "postgresql://postgres:password@postgres:5432/llm_policy_engine"
+  redis-url: "redis://redis:6379"
+  jwt-secret: "change-this-in-production-use-strong-secret"
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: llm-policy-engine
+  namespace: llm-devops
+  labels:
+    app: llm-policy-engine
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: llm-policy-engine
+  namespace: llm-devops
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: llm-policy-engine
+  namespace: llm-devops
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: llm-policy-engine
+subjects:
+- kind: ServiceAccount
+  name: llm-policy-engine
+  namespace: llm-devops

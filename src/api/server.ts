@@ -1,0 +1,169 @@
+/**
+ * Express REST API Server
+ * Production-ready API server with middleware and routes
+ */
+import express, { Express, Request, Response } from 'express';
+import bodyParser from 'body-parser';
+import cors from 'cors';
+import helmet from 'helmet';
+import compression from 'compression';
+import { config } from '@utils/config';
+import logger from '@utils/logger';
+import { db } from '@db/client';
+import { cacheManager } from '@cache/cache-manager';
+import { errorHandler, notFoundHandler, timeoutHandler } from './middleware/error-handler';
+import policyRoutes from './routes/policies';
+import evaluationRoutes from './routes/evaluations';
+
+export function createApp(): Express {
+  const app = express();
+
+  app.use(helmet());
+  app.use(cors());
+  app.use(compression());
+  app.use(bodyParser.json({ limit: '10mb' }));
+  app.use(bodyParser.urlencoded({ extended: true, limit: '10mb' }));
+  app.use(timeoutHandler(30000));
+
+  app.use((req, res, next) => {
+    const start = Date.now();
+
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      logger.info(
+        {
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          duration,
+          ip: req.ip,
+        },
+        'HTTP request',
+      );
+    });
+
+    next();
+  });
+
+  app.get('/health', async (_req: Request, res: Response) => {
+    try {
+      const dbHealthy = await db.ping();
+      const cacheHealth = await cacheManager.healthCheck();
+
+      const healthy = dbHealthy && cacheHealth.healthy;
+
+      res.status(healthy ? 200 : 503).json({
+        status: healthy ? 'healthy' : 'unhealthy',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        database: dbHealthy ? 'connected' : 'disconnected',
+        cache: cacheHealth.healthy ? 'connected' : 'disconnected',
+        memory: {
+          used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+          total: Math.round(process.memoryUsage().heapTotal / 1024 / 1024),
+        },
+      });
+    } catch (error) {
+      res.status(503).json({
+        status: 'unhealthy',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get('/ready', async (_req: Request, res: Response) => {
+    try {
+      const dbHealthy = await db.ping();
+
+      if (dbHealthy) {
+        res.status(200).json({ status: 'ready' });
+      } else {
+        res.status(503).json({ status: 'not ready', reason: 'database not connected' });
+      }
+    } catch (error) {
+      res.status(503).json({
+        status: 'not ready',
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  app.get('/', (_req: Request, res: Response) => {
+    res.json({
+      name: 'LLM Policy Engine API',
+      version: '1.0.0',
+      status: 'running',
+      endpoints: {
+        health: '/health',
+        ready: '/ready',
+        policies: '/api/policies',
+        evaluate: '/api/evaluate',
+      },
+    });
+  });
+
+  app.use('/api/policies', policyRoutes);
+  app.use('/api/evaluate', evaluationRoutes);
+
+  app.use(notFoundHandler);
+  app.use(errorHandler);
+
+  return app;
+}
+
+export async function startAPIServer(port?: number): Promise<void> {
+  const app = createApp();
+  const serverPort = port || config.server.port;
+
+  try {
+    const dbHealthy = await db.ping();
+    if (!dbHealthy) {
+      logger.error('Database connection failed. Exiting...');
+      process.exit(1);
+    }
+
+    const server = app.listen(serverPort, () => {
+      logger.info(
+        {
+          port: serverPort,
+          host: config.server.host,
+          env: config.nodeEnv,
+        },
+        'API server started',
+      );
+    });
+
+    const gracefulShutdown = async (signal: string) => {
+      logger.info({ signal }, 'Received shutdown signal');
+
+      server.close(async () => {
+        logger.info('HTTP server closed');
+
+        try {
+          await db.close();
+          await cacheManager.close();
+          logger.info('Connections closed successfully');
+          process.exit(0);
+        } catch (error) {
+          logger.error({ error }, 'Error during shutdown');
+          process.exit(1);
+        }
+      });
+
+      setTimeout(() => {
+        logger.error('Forced shutdown after timeout');
+        process.exit(1);
+      }, 10000);
+    };
+
+    process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+    process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+  } catch (error) {
+    logger.error({ error }, 'Failed to start API server');
+    process.exit(1);
+  }
+}
+
+if (require.main === module) {
+  startAPIServer();
+}

@@ -1,0 +1,137 @@
+[package]
+name = "llm-policy-engine"
+version = "0.1.0"
+edition = "2021"
+authors = ["LLM Policy Engine Team"]
+license = "MIT OR Apache-2.0"
+description = "High-performance policy engine for LLM operations"
+repository = "https://github.com/llm-policy-engine/llm-policy-engine"
+keywords = ["llm", "policy", "security", "governance", "ai"]
+categories = ["authentication", "security", "api-bindings"]
+
+[lib]
+name = "llm_policy_engine"
+path = "src/lib.rs"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "policy-engine"
+path = "src/daemon/main.rs"
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+futures = "0.3"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging and tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["json", "env-filter"] }
+tracing-opentelemetry = "0.22"
+opentelemetry = { version = "0.21", features = ["rt-tokio"] }
+opentelemetry-jaeger = "0.20"
+
+# gRPC
+tonic = { version = "0.11", features = ["tls", "tls-roots"] }
+prost = "0.12"
+prost-types = "0.12"
+
+# HTTP
+axum = { version = "0.7", features = ["macros"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+hyper = "1.1"
+
+# Expression evaluation (CEL)
+cel-interpreter = "0.7"
+
+# WASM runtime (sandboxing)
+wasmtime = "16.0"
+
+# Caching
+lru = "0.12"
+parking_lot = "0.12"
+moka = { version = "0.12", features = ["future"] }
+
+# Time and date
+chrono = { version = "0.4", features = ["serde"] }
+
+# Configuration
+config = "0.13"
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Cryptography
+blake3 = "1.5"
+sha2 = "0.10"
+
+# Metrics
+prometheus = "0.13"
+metrics = "0.21"
+metrics-exporter-prometheus = "0.13"
+
+# Redis (optional distributed cache)
+redis = { version = "0.24", features = ["tokio-comp", "connection-manager"], optional = true }
+
+# Database (for policy storage)
+sqlx = { version = "0.7", features = ["runtime-tokio-native-tls", "postgres", "sqlite"], optional = true }
+
+# Policy registry client
+reqwest = { version = "0.11", features = ["json", "rustls-tls"] }
+
+# Validation
+validator = { version = "0.16", features = ["derive"] }
+regex = "1.10"
+
+# Rate limiting
+governor = "0.6"
+
+# UUID
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Concurrency primitives
+arc-swap = "1.6"
+dashmap = "5.5"
+
+# CLI
+indicatif = "0.17"
+console = "0.15"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["async_tokio"] }
+proptest = "1.4"
+mockito = "1.2"
+wiremock = "0.6"
+
+[build-dependencies]
+tonic-build = "0.11"
+
+[features]
+default = ["redis-cache", "postgres-storage"]
+redis-cache = ["redis"]
+postgres-storage = ["sqlx"]
+sqlite-storage = ["sqlx"]
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+
+[profile.bench]
+inherits = "release"
+
+[[bench]]
+name = "policy_evaluation"
+harness = false
+
+[[bench]]
+name = "cache_performance"
+harness = false

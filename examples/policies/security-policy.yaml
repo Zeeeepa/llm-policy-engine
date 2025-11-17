@@ -1,0 +1,464 @@
+# Security Policy
+# Comprehensive security controls for LLM operations
+
+version: "1.0"
+metadata:
+  name: "security-policy"
+  namespace: "production"
+  description: "Security and compliance policy for LLM operations"
+  tags:
+    - security
+    - compliance
+    - pii-protection
+  created_at: "2025-11-17T00:00:00Z"
+  updated_at: "2025-11-17T00:00:00Z"
+  revision: 1
+  owner: "security-team@example.com"
+
+config:
+  default_action: deny
+  fail_open: false
+  audit_all_decisions: true
+  cache_ttl_seconds: 300
+
+rules:
+  # ============================================================================
+  # Critical Security Rules (Priority 100)
+  # ============================================================================
+
+  - id: "block-sql-injection"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "injection-attack"
+      compliance: ["SOC2", "ISO27001"]
+    conditions:
+      match: |
+        request.prompt.matches('(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER)\\s+.*\\s+(FROM|INTO|TABLE|DATABASE)') &&
+        !user.has_permission('sql.execution')
+    actions:
+      - type: deny
+        reason: "Potential SQL injection detected"
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          threat_type: "sql-injection"
+      - type: log
+        level: error
+
+  - id: "block-command-injection"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "injection-attack"
+    conditions:
+      match: |
+        request.prompt.matches('(;\\s*|&&\\s*|\\|\\|\\s*)(rm|cat|ls|wget|curl|bash|sh|python|node)') &&
+        !user.has_permission('command.execution')
+    actions:
+      - type: deny
+        reason: "Potential command injection detected"
+      - type: audit
+        severity: critical
+        alert: true
+
+  - id: "block-pii"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "data-protection"
+      compliance: ["GDPR", "CCPA"]
+    conditions:
+      match: |
+        contains_pii(request.prompt) &&
+        !user.has_permission('pii.access')
+    actions:
+      - type: deny
+        reason: "PII detected in prompt without proper authorization"
+      - type: audit
+        severity: high
+        alert: true
+        metadata:
+          pii_types: "{{ pii_detector.detect_types(request.prompt) }}"
+      - type: redact
+        fields: ["request.prompt"]
+        pattern: "pii"
+
+  - id: "block-credential-exposure"
+    priority: 100
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "credential-protection"
+    conditions:
+      match: |
+        request.prompt.matches('(password|api[_-]?key|secret|token|private[_-]?key)\\s*[:=]\\s*[\'"]?[a-zA-Z0-9+/=]{8,}')
+    actions:
+      - type: deny
+        reason: "Potential credential exposure detected"
+      - type: audit
+        severity: critical
+        alert: true
+      - type: redact
+        fields: ["request.prompt"]
+        pattern: "credentials"
+
+  # ============================================================================
+  # Content Safety Rules (Priority 90-99)
+  # ============================================================================
+
+  - id: "content-safety-check"
+    priority: 95
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "content-safety"
+    conditions:
+      match: |
+        content_safety.score(request.prompt) < 0.7
+    actions:
+      - type: deny
+        reason: "Content safety score below threshold"
+      - type: audit
+        severity: high
+        metadata:
+          safety_score: "{{ content_safety.score(request.prompt) }}"
+          categories: "{{ content_safety.categories(request.prompt) }}"
+
+  - id: "toxicity-filter"
+    priority: 94
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "content-moderation"
+    conditions:
+      match: |
+        toxicity.score(request.prompt) > 0.5
+    actions:
+      - type: deny
+        reason: "Toxic content detected"
+      - type: audit
+        severity: high
+        metadata:
+          toxicity_score: "{{ toxicity.score(request.prompt) }}"
+
+  - id: "hate-speech-filter"
+    priority: 93
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "content-moderation"
+    conditions:
+      match: |
+        hate_speech.detected(request.prompt)
+    actions:
+      - type: deny
+        reason: "Hate speech detected"
+      - type: audit
+        severity: critical
+        alert: true
+
+  # ============================================================================
+  # Shield Integration (Priority 85-89)
+  # ============================================================================
+
+  - id: "shield-prompt-scan"
+    priority: 88
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "security-scanning"
+      integration: "llm-shield"
+    conditions:
+      match: |
+        shield.scan_prompt(request.prompt, user.id).passed == false
+    actions:
+      - type: deny
+        reason: "Security scan failed"
+      - type: audit
+        severity: high
+        metadata:
+          threats: "{{ shield.scan_prompt(request.prompt, user.id).threats }}"
+          suggestions: "{{ shield.scan_prompt(request.prompt, user.id).suggestions }}"
+
+  - id: "shield-jailbreak-detection"
+    priority: 87
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "jailbreak-protection"
+    conditions:
+      match: |
+        shield.detect_jailbreak(request.prompt).detected
+    actions:
+      - type: deny
+        reason: "Jailbreak attempt detected"
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          jailbreak_type: "{{ shield.detect_jailbreak(request.prompt).type }}"
+
+  # ============================================================================
+  # Authentication & Authorization (Priority 80-84)
+  # ============================================================================
+
+  - id: "require-authentication"
+    priority: 84
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "authentication"
+    conditions:
+      match: |
+        user.id == null || user.id == ''
+    actions:
+      - type: deny
+        reason: "Authentication required"
+      - type: audit
+        severity: medium
+
+  - id: "check-user-permissions"
+    priority: 83
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "authorization"
+    conditions:
+      match: |
+        !user.has_permission('llm.access')
+    actions:
+      - type: deny
+        reason: "User does not have permission to access LLM"
+      - type: audit
+        severity: medium
+
+  - id: "require-mfa-for-sensitive"
+    priority: 82
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "mfa"
+    conditions:
+      match: |
+        request.tags.contains('sensitive') &&
+        !user.mfa_verified
+    actions:
+      - type: deny
+        reason: "MFA verification required for sensitive operations"
+      - type: audit
+        severity: high
+
+  # ============================================================================
+  # Compliance Rules (Priority 70-79)
+  # ============================================================================
+
+  - id: "gdpr-data-residency"
+    priority: 78
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      regulation: "GDPR"
+    conditions:
+      match: |
+        user.region == 'EU' &&
+        !request.model_region in ['eu-west-1', 'eu-central-1']
+    actions:
+      - type: deny
+        reason: "GDPR compliance: data must remain in EU"
+      - type: suggest_alternative
+        models: ["gpt-4-eu", "claude-3-eu"]
+      - type: audit
+        severity: high
+        metadata:
+          compliance: "GDPR"
+          violation: "data-residency"
+
+  - id: "hipaa-audit"
+    priority: 77
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      regulation: "HIPAA"
+    conditions:
+      match: |
+        request.tags.contains('healthcare') ||
+        contains_phi(request.prompt)
+    actions:
+      - type: allow  # Allow but with strict auditing
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          compliance: "HIPAA"
+          category: "protected-health-information"
+      - type: log
+        level: warning
+
+  - id: "sox-financial-data"
+    priority: 76
+    enabled: true
+    metadata:
+      severity: "high"
+      category: "compliance"
+      regulation: "SOX"
+    conditions:
+      match: |
+        request.tags.contains('financial') &&
+        !user.has_permission('financial.access')
+    actions:
+      - type: deny
+        reason: "SOX compliance: unauthorized access to financial data"
+      - type: audit
+        severity: critical
+        alert: true
+
+  # ============================================================================
+  # Rate Limiting (Priority 60-69)
+  # ============================================================================
+
+  - id: "rate-limit-per-second"
+    priority: 68
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "rate-limiting"
+    conditions:
+      match: |
+        rate_limit.count(user.id, '1s') > 10
+    actions:
+      - type: throttle
+        delay_ms: 100
+        max_retries: 3
+      - type: audit
+        severity: low
+
+  - id: "rate-limit-per-minute"
+    priority: 67
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "rate-limiting"
+    conditions:
+      match: |
+        rate_limit.count(user.id, '1m') > user.quota.requests_per_minute
+    actions:
+      - type: throttle
+        delay_ms: 1000
+        max_retries: 3
+      - type: audit
+        severity: medium
+
+  - id: "rate-limit-per-hour"
+    priority: 66
+    enabled: true
+    metadata:
+      severity: "medium"
+      category: "rate-limiting"
+    conditions:
+      match: |
+        rate_limit.count(user.id, '1h') > user.quota.requests_per_hour
+    actions:
+      - type: deny
+        reason: "Hourly rate limit exceeded"
+      - type: audit
+        severity: medium
+
+  # ============================================================================
+  # Emergency Controls (Priority 50-59)
+  # ============================================================================
+
+  - id: "circuit-breaker"
+    priority: 58
+    enabled: true
+    metadata:
+      severity: "critical"
+      category: "circuit-breaker"
+    conditions:
+      match: |
+        system.error_rate > 0.1 ||
+        system.latency_p99 > 5000
+    actions:
+      - type: deny
+        reason: "Circuit breaker triggered - system degraded"
+      - type: audit
+        severity: critical
+        alert: true
+        metadata:
+          error_rate: "{{ system.error_rate }}"
+          latency_p99: "{{ system.latency_p99 }}"
+
+  - id: "maintenance-mode"
+    priority: 57
+    enabled: false  # Enable during maintenance
+    metadata:
+      severity: "low"
+      category: "maintenance"
+    conditions:
+      match: "true"
+    actions:
+      - type: deny
+        reason: "System under maintenance"
+      - type: audit
+        severity: low
+
+  # ============================================================================
+  # Default Allow (Priority 0)
+  # ============================================================================
+
+  - id: "default-allow"
+    priority: 0
+    enabled: true
+    metadata:
+      severity: "info"
+      category: "default"
+    conditions:
+      match: "true"
+    actions:
+      - type: allow
+      - type: audit
+        severity: info
+      - type: log
+        level: debug
+
+# ============================================================================
+# Exception Handling
+# ============================================================================
+
+exceptions:
+  - id: "emergency-override"
+    enabled: false  # Must be explicitly enabled
+    conditions:
+      match: |
+        request.context.emergency_override == true &&
+        user.role == 'admin' &&
+        user.mfa_verified
+    action: allow_all
+    audit: true
+    requires_approval: true
+
+  - id: "security-team-bypass"
+    enabled: true
+    conditions:
+      match: |
+        user.team == 'security' &&
+        user.has_permission('security.bypass')
+    action: allow_all
+    audit: true
+    requires_approval: false
+
+# ============================================================================
+# Fallback Behavior
+# ============================================================================
+
+fallback:
+  action: deny
+  reason: "Policy evaluation failed - failing secure"
+  audit: true
+  alert: true
