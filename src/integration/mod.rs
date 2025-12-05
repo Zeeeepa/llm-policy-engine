@@ -9,6 +9,14 @@
 //! - **Edge Agent**: Policy distribution to edge locations
 //! - **Incident Manager**: Policy violation alerting
 //! - **Sentinel**: Security monitoring
+//!
+//! ## Phase 2B Integrations (Consumes-From Pattern)
+//!
+//! The following adapters consume from upstream LLM Dev Ops services:
+//!
+//! - **Schema Registry**: Schema validation for policy documents and rules
+//! - **Config Manager**: Dynamic configuration and enforcement parameters
+//! - **Observatory**: Telemetry signals and trace context propagation
 
 mod client;
 mod costops;
@@ -18,6 +26,11 @@ mod incident_manager;
 mod sentinel;
 mod shield;
 
+// Phase 2B: Upstream consumption adapters
+mod config_manager;
+mod observatory;
+mod schema_registry;
+
 pub use client::{IntegrationClient, IntegrationResult};
 pub use costops::CostOpsClient;
 pub use edge_agent::EdgeAgentClient;
@@ -25,6 +38,19 @@ pub use governance::GovernanceClient;
 pub use incident_manager::IncidentManagerClient;
 pub use sentinel::SentinelClient;
 pub use shield::ShieldClient;
+
+// Phase 2B: Re-export upstream adapters
+pub use config_manager::{
+    ConfigManagerAdapter, ConfigValue, ConfigValueType, EnforcementParams, FeatureFlags,
+    PolicySettings, RuleThresholds,
+};
+pub use observatory::{
+    DecisionOutcome, ObservatoryAdapter, PolicyDecisionRecord, PolicyEvaluationEvent,
+    TelemetrySignals, TraceContext,
+};
+pub use schema_registry::{
+    SchemaDefinition, SchemaRegistryAdapter, SchemaType, ValidationResult,
+};
 
 use crate::config::IntegrationsConfig;
 use std::sync::Arc;
@@ -43,6 +69,14 @@ pub struct Integrations {
     pub incident_manager: Option<Arc<IncidentManagerClient>>,
     /// Sentinel client for security monitoring
     pub sentinel: Option<Arc<SentinelClient>>,
+
+    // Phase 2B: Upstream consumption adapters
+    /// Schema Registry adapter for schema validation
+    pub schema_registry: Option<Arc<SchemaRegistryAdapter>>,
+    /// Config Manager adapter for dynamic configuration
+    pub config_manager: Option<Arc<ConfigManagerAdapter>>,
+    /// Observatory adapter for telemetry and tracing
+    pub observatory: Option<Arc<ObservatoryAdapter>>,
 }
 
 impl Integrations {
@@ -73,6 +107,20 @@ impl Integrations {
                 .sentinel_url
                 .as_ref()
                 .map(|url| Arc::new(SentinelClient::new(url.clone(), config.timeout()))),
+
+            // Phase 2B: Upstream consumption adapters
+            schema_registry: config
+                .schema_registry_url
+                .as_ref()
+                .map(|url| Arc::new(SchemaRegistryAdapter::new(url.clone(), config.timeout()))),
+            config_manager: config
+                .config_manager_url
+                .as_ref()
+                .map(|url| Arc::new(ConfigManagerAdapter::new(url.clone(), config.timeout()))),
+            observatory: config
+                .observatory_url
+                .as_ref()
+                .map(|url| Arc::new(ObservatoryAdapter::new(url.clone(), config.timeout()))),
         }
     }
 
@@ -84,5 +132,15 @@ impl Integrations {
             || self.edge_agent.is_some()
             || self.incident_manager.is_some()
             || self.sentinel.is_some()
+            || self.schema_registry.is_some()
+            || self.config_manager.is_some()
+            || self.observatory.is_some()
+    }
+
+    /// Check if any Phase 2B upstream adapters are configured.
+    pub fn any_upstream_configured(&self) -> bool {
+        self.schema_registry.is_some()
+            || self.config_manager.is_some()
+            || self.observatory.is_some()
     }
 }

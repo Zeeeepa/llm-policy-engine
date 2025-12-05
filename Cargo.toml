@@ -44,6 +44,16 @@ uuid = { version = "1.6", features = ["v4", "serde"] }
 # Testing
 criterion = { version = "0.5", features = ["async_tokio"] }
 
+# LLM Dev Ops Platform Dependencies (compile-time only - Phase 2A)
+# Schema Registry - Schema validation and management for LLM operations
+schema-registry-core = { git = "https://github.com/LLM-Dev-Ops/schema-registry", branch = "main" }
+
+# Config Manager - Configuration management with RBAC and encryption
+llm-config-core = { git = "https://github.com/LLM-Dev-Ops/config-manager", branch = "main" }
+
+# Observatory - Observability and telemetry aggregation
+llm-observatory-core = { git = "https://github.com/LLM-Dev-Ops/observatory", branch = "main" }
+
 [package]
 name = "llm-policy-engine"
 version = "0.1.0"
@@ -151,6 +161,13 @@ dashmap = "5.5"
 # CLI
 indicatif = "0.17"
 console = "0.15"
+
+# LLM Dev Ops Platform Dependencies (compile-time only - Phase 2A)
+# These dependencies are added for structural integration. Runtime consumption
+# logic and adapters will be implemented in Phase 2B.
+schema-registry-core = { workspace = true }
+llm-config-core = { workspace = true }
+llm-observatory-core = { workspace = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["async_tokio"] }

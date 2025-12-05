@@ -168,6 +168,15 @@ pub struct IntegrationsConfig {
     pub incident_manager_url: Option<String>,
     /// Sentinel service URL
     pub sentinel_url: Option<String>,
+
+    // Phase 2B: Upstream consumption adapters
+    /// LLM Schema Registry service URL
+    pub schema_registry_url: Option<String>,
+    /// LLM Config Manager service URL
+    pub config_manager_url: Option<String>,
+    /// LLM Observatory service URL
+    pub observatory_url: Option<String>,
+
     /// Integration request timeout in milliseconds
     pub timeout_ms: u64,
     /// Whether to fail evaluation if integration fails
@@ -183,6 +192,10 @@ impl Default for IntegrationsConfig {
             edge_agent_url: None,
             incident_manager_url: None,
             sentinel_url: None,
+            // Phase 2B: Upstream consumption adapters
+            schema_registry_url: None,
+            config_manager_url: None,
+            observatory_url: None,
             timeout_ms: 5000,
             fail_on_error: false,
         }
@@ -330,6 +343,17 @@ impl Config {
         }
         if let Ok(url) = std::env::var("SENTINEL_URL") {
             config.integrations.sentinel_url = Some(url);
+        }
+
+        // Phase 2B: Upstream consumption adapter URLs
+        if let Ok(url) = std::env::var("LLM_SCHEMA_REGISTRY_URL") {
+            config.integrations.schema_registry_url = Some(url);
+        }
+        if let Ok(url) = std::env::var("LLM_CONFIG_MANAGER_URL") {
+            config.integrations.config_manager_url = Some(url);
+        }
+        if let Ok(url) = std::env::var("LLM_OBSERVATORY_URL") {
+            config.integrations.observatory_url = Some(url);
         }
 
         // Security config
