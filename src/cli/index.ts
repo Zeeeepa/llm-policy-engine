@@ -2,12 +2,16 @@
 /**
  * LLM-Policy-Engine CLI
  * Command-line interface for policy management and evaluation
+ *
+ * Executive Synthesis Integration:
+ * - policy create: synthesis with conflict analysis and enforcement impact
+ * - policy edit: synthesis with change tracking and impact projection
+ * - policy enable: synthesis with rollback instructions
+ * - policy disable: synthesis with rollback instructions
+ * - policy dry-run: violation predictions without state change
  */
 import { Command } from 'commander';
 import { readFileSync } from 'fs';
-import { YAMLParser } from '../core/parser/yaml-parser';
-import { JSONParser } from '../core/parser/json-parser';
-import { SchemaValidator } from '../core/validator/schema-validator';
 import { PolicyRepository } from '../db/models/policy-repository';
 import { EvaluationRepository } from '../db/models/evaluation-repository';
 import { PolicyEngine } from '../core/engine/policy-engine';
@@ -15,13 +19,132 @@ import { db } from '../db/client';
 import { MigrationRunner } from '../db/migrate';
 import { Policy, PolicyEvaluationRequest, EvaluationContext } from '../types/policy';
 import { v4 as uuidv4 } from 'uuid';
+import {
+  createPolicy,
+  updatePolicy,
+  enablePolicy,
+  disablePolicy,
+  dryRunPolicy,
+  validatePolicy as validatePolicyCmd,
+} from '../commands/policy';
+import {
+  ExecutiveSummary,
+  DecisionPacket,
+  PolicyDryRunResult,
+} from '../synthesis';
 
 const program = new Command();
 const policyRepository = new PolicyRepository();
 const evaluationRepository = new EvaluationRepository();
-const yamlParser = new YAMLParser();
-const jsonParser = new JSONParser();
-const validator = new SchemaValidator();
+// Note: yamlParser, jsonParser, and validator are used directly in command modules now
+
+/**
+ * Format and output executive synthesis for CLI display
+ */
+function outputSynthesis(synthesis: ExecutiveSummary, label: string = 'Executive Synthesis'): void {
+  console.log(`\n--- ${label} ---`);
+  console.log(`Risk Level: ${synthesis.risk_level.toUpperCase()}`);
+  console.log(`Recommendation: ${synthesis.recommendation}`);
+  console.log(`Rationale: ${synthesis.rationale}`);
+
+  if (synthesis.iteration_metrics.blocking_issues.length > 0) {
+    console.log(`\nBlocking Issues (${synthesis.iteration_metrics.blocking_issues.length}):`);
+    synthesis.iteration_metrics.blocking_issues.forEach((issue, idx) => {
+      console.log(`  ${idx + 1}. [${issue.severity.toUpperCase()}] ${issue.type}: ${issue.description}`);
+      if (issue.rule_id) {
+        console.log(`     Rule: ${issue.rule_id}`);
+      }
+    });
+  }
+
+  console.log(`\nSteps Executed: ${synthesis.iteration_metrics.steps_executed.join(' -> ')}`);
+  console.log(`Success Rate: ${(synthesis.iteration_metrics.success_rate * 100).toFixed(1)}%`);
+  console.log(`Environment: ${synthesis.deploy_reference.environment}`);
+  console.log(`Timestamp: ${synthesis.deploy_reference.timestamp}`);
+}
+
+/**
+ * Format and output decision packet for CLI display
+ */
+function outputDecisionPacket(packet: DecisionPacket): void {
+  console.log('\n--- Decision Packet ---');
+
+  // Conflict Analysis
+  console.log(`\nConflict Analysis:`);
+  console.log(`  Has Conflicts: ${packet.conflict_analysis.has_conflicts ? 'YES' : 'No'}`);
+  console.log(`  Summary: ${packet.conflict_analysis.summary}`);
+  if (packet.conflict_analysis.conflicts.length > 0) {
+    console.log(`  Conflicts (${packet.conflict_analysis.conflicts.length}):`);
+    packet.conflict_analysis.conflicts.forEach((conflict, idx) => {
+      console.log(`    ${idx + 1}. [${conflict.severity.toUpperCase()}] ${conflict.conflict_type}`);
+      console.log(`       ${conflict.description}`);
+      if (conflict.resolution) {
+        console.log(`       Resolution: ${conflict.resolution}`);
+      }
+    });
+  }
+
+  // Affected Resources
+  console.log(`\nAffected Resource Count: ${packet.affected_resource_count}`);
+
+  // Enforcement Impact
+  console.log(`\nEnforcement Impact Projection:`);
+  console.log(`  Impact Level: ${packet.enforcement_impact.impact_level.toUpperCase()}`);
+  console.log(`  Description: ${packet.enforcement_impact.description}`);
+  console.log(`  Confidence: ${(packet.enforcement_impact.confidence * 100).toFixed(0)}%`);
+  console.log(`  Predictions (per hour):`);
+  console.log(`    - Allowed: ~${packet.enforcement_impact.allowed_predictions}`);
+  console.log(`    - Denied: ~${packet.enforcement_impact.denied_predictions}`);
+  console.log(`    - Warned: ~${packet.enforcement_impact.warned_predictions}`);
+  console.log(`    - Modified: ~${packet.enforcement_impact.modified_predictions}`);
+
+  // Rollback Instructions (if present)
+  if (packet.rollback_instructions) {
+    console.log(`\nRollback Instructions:`);
+    console.log(`  Previous Status: ${packet.rollback_instructions.previous_status}`);
+    console.log(`  Rollback Command: ${packet.rollback_instructions.rollback_command}`);
+    console.log(`  Safe Rollback Window: ${packet.rollback_instructions.safe_rollback_window}`);
+    console.log(`  Verification Steps:`);
+    packet.rollback_instructions.verification_steps.forEach((step, idx) => {
+      console.log(`    ${idx + 1}. ${step}`);
+    });
+    if (packet.rollback_instructions.warnings.length > 0) {
+      console.log(`  Warnings:`);
+      packet.rollback_instructions.warnings.forEach((warning) => {
+        console.log(`    ⚠️  ${warning}`);
+      });
+    }
+  }
+}
+
+/**
+ * Format and output dry-run results for CLI display
+ */
+function outputDryRunResults(result: PolicyDryRunResult): void {
+  console.log('\n=== Policy Dry-Run Results ===');
+  console.log(`Policy ID: ${result.policy_id}`);
+  console.log(`Can Apply: ${result.can_apply ? 'YES' : 'NO'}`);
+
+  if (result.validation_errors.length > 0) {
+    console.log(`\nValidation Errors (${result.validation_errors.length}):`);
+    result.validation_errors.forEach((err, idx) => {
+      console.log(`  ${idx + 1}. ${err}`);
+    });
+  }
+
+  if (result.violation_predictions.length > 0) {
+    console.log(`\nViolation Predictions (${result.violation_predictions.length}):`);
+    result.violation_predictions.forEach((vp, idx) => {
+      console.log(`  ${idx + 1}. [${vp.risk_level.toUpperCase()}] ${vp.rule_name}`);
+      console.log(`     Action: ${vp.predicted_action}`);
+      console.log(`     Frequency: ${vp.estimated_frequency} (~${vp.estimated_affected_requests_per_hour}/hour)`);
+      console.log(`     Trigger conditions: ${vp.sample_trigger_conditions.join(', ')}`);
+    });
+  }
+
+  outputDecisionPacket(result.decision_packet);
+  outputSynthesis(result.synthesis);
+}
 
 program
   .name('llm-policy')
@@ -33,26 +156,37 @@ const policyCommand = program.command('policy').description('Manage policies');
 
 policyCommand
   .command('create')
-  .description('Create a new policy from file')
+  .description('Create a new policy from file (with executive synthesis)')
   .argument('<file>', 'Policy file (YAML or JSON)')
   .option('-c, --created-by <user>', 'User creating the policy')
+  .option('--json', 'Output full result as JSON')
+  .option('--no-synthesis', 'Disable synthesis output')
   .action(async (file: string, options) => {
     try {
-      const content = readFileSync(file, 'utf-8');
-      const policy = file.endsWith('.yaml') || file.endsWith('.yml')
-        ? yamlParser.parse(content)
-        : jsonParser.parse(content);
+      const result = await createPolicy(file, options.createdBy);
 
-      const validation = validator.validate(policy);
-      if (!validation.valid) {
-        console.error('Policy validation failed:');
-        validation.errors.forEach((err) => console.error(`  - ${err}`));
-        process.exit(1);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.validation_errors.length > 0) {
+          console.error('Policy validation failed:');
+          result.validation_errors.forEach((err) => console.error(`  - ${err}`));
+          if (result.synthesis && options.synthesis !== false) {
+            outputSynthesis(result.synthesis, 'Validation Synthesis');
+          }
+          await db.close();
+          process.exit(1);
+        }
+
+        console.log(`Policy created successfully: ${result.policy_id}`);
+        console.log(`  Version: ${result.version}`);
+        console.log(`  Status: ${result.status}`);
+        console.log(`  Rules: ${result.rules_count}`);
+
+        if (result.synthesis && options.synthesis !== false) {
+          outputSynthesis(result.synthesis, 'Create Synthesis');
+        }
       }
-
-      const created = await policyRepository.create(policy, options.createdBy);
-      console.log(`Policy created successfully: ${created.metadata.id}`);
-      console.log(JSON.stringify(created, null, 2));
 
       await db.close();
       process.exit(0);
@@ -65,26 +199,37 @@ policyCommand
 
 policyCommand
   .command('update')
-  .description('Update an existing policy')
+  .description('Update an existing policy (with executive synthesis)')
+  .alias('edit')
   .argument('<id>', 'Policy ID')
   .argument('<file>', 'Policy file (YAML or JSON)')
-  .action(async (id: string, file: string) => {
+  .option('--json', 'Output full result as JSON')
+  .option('--no-synthesis', 'Disable synthesis output')
+  .action(async (id: string, file: string, options) => {
     try {
-      const content = readFileSync(file, 'utf-8');
-      const policy = file.endsWith('.yaml') || file.endsWith('.yml')
-        ? yamlParser.parse(content)
-        : jsonParser.parse(content);
+      const result = await updatePolicy(id, file);
 
-      const validation = validator.validate(policy);
-      if (!validation.valid) {
-        console.error('Policy validation failed:');
-        validation.errors.forEach((err) => console.error(`  - ${err}`));
-        process.exit(1);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        if (result.validation_errors.length > 0) {
+          console.error('Policy validation failed:');
+          result.validation_errors.forEach((err) => console.error(`  - ${err}`));
+          if (result.synthesis && options.synthesis !== false) {
+            outputSynthesis(result.synthesis, 'Validation Synthesis');
+          }
+          await db.close();
+          process.exit(1);
+        }
+
+        console.log(`Policy updated successfully: ${result.policy_id}`);
+        console.log(`  Version: ${result.version} (was: ${result.previous_version})`);
+        console.log(`  Changes: ${result.changes_applied.join(', ') || 'none'}`);
+
+        if (result.synthesis && options.synthesis !== false) {
+          outputSynthesis(result.synthesis, 'Edit Synthesis');
+        }
       }
-
-      const updated = await policyRepository.update(id, policy);
-      console.log(`Policy updated successfully: ${updated.metadata.id}`);
-      console.log(JSON.stringify(updated, null, 2));
 
       await db.close();
       process.exit(0);
@@ -184,31 +329,132 @@ policyCommand
 
 policyCommand
   .command('validate')
-  .description('Validate a policy file without creating it')
+  .description('Validate a policy file without creating it (with synthesis)')
   .argument('<file>', 'Policy file (YAML or JSON)')
-  .action(async (file: string) => {
+  .option('--json', 'Output full result as JSON')
+  .option('--no-synthesis', 'Disable synthesis output')
+  .action(async (file: string, options) => {
     try {
-      const content = readFileSync(file, 'utf-8');
-      const policy = file.endsWith('.yaml') || file.endsWith('.yml')
-        ? yamlParser.parse(content)
-        : jsonParser.parse(content);
+      const result = await validatePolicyCmd(file);
 
-      const validation = validator.validate(policy);
-
-      if (validation.valid) {
-        console.log('Policy is valid');
-        console.log(`  ID: ${policy.metadata.id}`);
-        console.log(`  Name: ${policy.metadata.name}`);
-        console.log(`  Rules: ${policy.rules.length}`);
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
       } else {
-        console.error('Policy validation failed:');
-        validation.errors.forEach((err) => console.error(`  - ${err}`));
-        process.exit(1);
+        if (result.valid) {
+          console.log('Policy is valid');
+          console.log(`  ID: ${result.policy.metadata.id}`);
+          console.log(`  Name: ${result.policy.metadata.name}`);
+          console.log(`  Rules: ${result.policy.rules.length}`);
+        } else {
+          console.error('Policy validation failed:');
+          result.errors.forEach((err) => console.error(`  - ${err}`));
+        }
+
+        if (result.synthesis && options.synthesis !== false) {
+          outputSynthesis(result.synthesis, 'Validation Synthesis');
+        }
       }
 
-      process.exit(0);
+      process.exit(result.valid ? 0 : 1);
     } catch (error) {
       console.error('Failed to validate policy:', error);
+      process.exit(1);
+    }
+  });
+
+policyCommand
+  .command('enable')
+  .description('Enable a policy (with rollback instructions in synthesis)')
+  .argument('<id>', 'Policy ID')
+  .option('--json', 'Output full result as JSON')
+  .option('--no-synthesis', 'Disable synthesis output')
+  .action(async (id: string, options) => {
+    try {
+      const result = await enablePolicy(id);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Policy enabled successfully: ${result.policy_id}`);
+        console.log(`  Previous Status: ${result.previous_status}`);
+        console.log(`  New Status: ${result.new_status}`);
+        console.log(`  Affected Rules: ${result.affected_rules}`);
+
+        if (result.decision_packet && options.synthesis !== false) {
+          outputDecisionPacket(result.decision_packet);
+        }
+
+        if (result.synthesis && options.synthesis !== false) {
+          outputSynthesis(result.synthesis, 'Enable Synthesis');
+        }
+      }
+
+      await db.close();
+      process.exit(0);
+    } catch (error) {
+      console.error('Failed to enable policy:', error);
+      await db.close();
+      process.exit(1);
+    }
+  });
+
+policyCommand
+  .command('disable')
+  .description('Disable a policy (with rollback instructions in synthesis)')
+  .argument('<id>', 'Policy ID')
+  .option('--json', 'Output full result as JSON')
+  .option('--no-synthesis', 'Disable synthesis output')
+  .action(async (id: string, options) => {
+    try {
+      const result = await disablePolicy(id);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        console.log(`Policy disabled successfully: ${result.policy_id}`);
+        console.log(`  Previous Status: ${result.previous_status}`);
+        console.log(`  New Status: ${result.new_status}`);
+        console.log(`  Affected Rules: ${result.affected_rules}`);
+
+        if (result.decision_packet && options.synthesis !== false) {
+          outputDecisionPacket(result.decision_packet);
+        }
+
+        if (result.synthesis && options.synthesis !== false) {
+          outputSynthesis(result.synthesis, 'Disable Synthesis');
+        }
+      }
+
+      await db.close();
+      process.exit(0);
+    } catch (error) {
+      console.error('Failed to disable policy:', error);
+      await db.close();
+      process.exit(1);
+    }
+  });
+
+policyCommand
+  .command('dry-run')
+  .description('Evaluate policy impact without state changes (violation predictions)')
+  .argument('<file>', 'Policy file (YAML or JSON)')
+  .option('--json', 'Output full result as JSON')
+  .action(async (file: string, options) => {
+    try {
+      const result = await dryRunPolicy(file);
+
+      if (options.json) {
+        console.log(JSON.stringify(result, null, 2));
+      } else {
+        outputDryRunResults(result);
+      }
+
+      await db.close();
+      // Exit with non-zero if policy cannot be applied
+      process.exit(result.can_apply ? 0 : 1);
+    } catch (error) {
+      console.error('Failed to run policy dry-run:', error);
+      await db.close();
       process.exit(1);
     }
   });

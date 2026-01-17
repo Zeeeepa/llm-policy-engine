@@ -15,9 +15,12 @@ import {
   PolicyEditResult,
   PolicyToggleResult,
   PolicyDeleteResult,
+  PolicyDryRunResult,
   buildPolicyCreateSynthesis,
   buildPolicyEditSynthesis,
   buildPolicyToggleSynthesis,
+  buildPolicyDryRunSynthesis,
+  buildDecisionPacket,
   buildExecutiveSummary,
   elevateRiskForProduction,
   extractBlockingIssues,
@@ -158,6 +161,7 @@ export async function updatePolicy(
 
 /**
  * Toggle policy status (enable/disable/deprecate)
+ * Includes rollback instructions in synthesis for enable/disable operations
  */
 export async function togglePolicyStatus(
   policyId: string,
@@ -171,6 +175,21 @@ export async function togglePolicyStatus(
   const previousStatus = existingPolicy.status;
   const updated = await policyRepository.update(policyId, { status: newStatus });
 
+  // Get existing policies for conflict analysis
+  const existingPolicies = await policyRepository.findActive();
+
+  // Determine operation type for rollback instructions
+  const isEnabling = newStatus === PolicyStatus.ACTIVE && previousStatus !== PolicyStatus.ACTIVE;
+  const isDisabling = newStatus !== PolicyStatus.ACTIVE && previousStatus === PolicyStatus.ACTIVE;
+  const operationType = isEnabling ? 'enable' : isDisabling ? 'disable' : 'edit';
+
+  // Build decision packet with rollback instructions
+  const decisionPacket = buildDecisionPacket(updated, existingPolicies, {
+    includeRollback: true,
+    previousStatus,
+    operationType,
+  });
+
   const synthesis = buildPolicyToggleSynthesis(
     updated,
     previousStatus,
@@ -181,11 +200,17 @@ export async function togglePolicyStatus(
     elevateRiskForProduction(synthesis);
   }
 
+  // Enhance rationale with rollback info for enable/disable
+  if (decisionPacket.rollback_instructions) {
+    synthesis.rationale = `${synthesis.rationale}. Rollback: ${decisionPacket.rollback_instructions.rollback_command}`;
+  }
+
   return {
     policy_id: policyId,
     previous_status: previousStatus,
     new_status: newStatus,
     affected_rules: updated.rules.filter(r => r.enabled !== false).length,
+    decision_packet: decisionPacket,
     synthesis,
   };
 }
@@ -359,11 +384,62 @@ function analyzeSecurityRisks(policy: Policy): Array<{
   return risks;
 }
 
+/**
+ * Dry-run policy evaluation without state changes
+ * Returns violation predictions and enforcement impact projection
+ */
+export async function dryRunPolicy(filePath: string): Promise<PolicyDryRunResult> {
+  const policy = parsePolicy(filePath);
+  const validation = validator.validate(policy);
+
+  // Get existing policies for conflict analysis
+  const existingPolicies = await policyRepository.findActive();
+
+  // Build comprehensive dry-run synthesis
+  const {
+    canApply,
+    violationPredictions,
+    decisionPacket,
+    synthesis,
+  } = buildPolicyDryRunSynthesis(policy, validation.errors, existingPolicies);
+
+  // Apply production risk elevation
+  if (isProductionTarget(policy.metadata.namespace)) {
+    elevateRiskForProduction(synthesis);
+  }
+
+  return {
+    policy_id: policy.metadata.id,
+    can_apply: canApply,
+    validation_errors: validation.errors,
+    violation_predictions: violationPredictions,
+    decision_packet: decisionPacket,
+    synthesis,
+  };
+}
+
+/**
+ * Enable a policy (convenience wrapper for togglePolicyStatus)
+ */
+export async function enablePolicy(policyId: string): Promise<PolicyToggleResult> {
+  return togglePolicyStatus(policyId, PolicyStatus.ACTIVE);
+}
+
+/**
+ * Disable a policy (convenience wrapper for togglePolicyStatus)
+ */
+export async function disablePolicy(policyId: string): Promise<PolicyToggleResult> {
+  return togglePolicyStatus(policyId, PolicyStatus.DRAFT);
+}
+
 export default {
   createPolicy,
   updatePolicy,
   togglePolicyStatus,
+  enablePolicy,
+  disablePolicy,
   deletePolicy,
   validatePolicy,
   analyzePolicy,
+  dryRunPolicy,
 };
