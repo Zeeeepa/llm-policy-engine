@@ -54,3 +54,9 @@ secrets/
 
 # Misc
 .husky/_
+
+# Claude Code / Claude Flow local configuration
+.claude/
+.claude-flow/
+.mcp.json
+CLAUDE.md
