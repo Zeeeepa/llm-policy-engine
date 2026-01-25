@@ -18,6 +18,10 @@ import {
   DecisionEvent,
   AgentRegistration,
 } from '../../agents/contracts/decision-event';
+import type {
+  GovernanceSignal,
+  GovernanceSignalAck,
+} from '../../governance/contracts/governance-signals';
 
 /**
  * Response from persisting a DecisionEvent
@@ -331,6 +335,69 @@ export class RuVectorServiceClient {
         version: 'unknown',
         latency_ms: Date.now() - startTime,
       };
+    }
+  }
+
+  /**
+   * Persist a governance signal to ruvector-service
+   * Phase 4 Layer 1 - Governance & FinOps
+   */
+  async persistGovernanceSignal(signal: GovernanceSignal): Promise<GovernanceSignalAck> {
+    if (!this.enabled) {
+      logger.debug('RuVector service integration disabled');
+      return { accepted: true, signal_id: signal.signal_id };
+    }
+
+    try {
+      const response = await this.client.post<GovernanceSignalAck>(
+        '/api/v1/governance-signals',
+        signal
+      );
+
+      logger.info(
+        {
+          signal_id: signal.signal_id,
+          signal_type: signal.signal_type,
+          severity: signal.severity,
+          advisory_only: signal.advisory_only,
+        },
+        'Governance signal persisted successfully'
+      );
+
+      return response.data;
+    } catch (error) {
+      return this.handleError(error, 'persistGovernanceSignal', {
+        accepted: false,
+        signal_id: signal.signal_id,
+        error: this.getErrorMessage(error),
+      });
+    }
+  }
+
+  /**
+   * Query governance signals
+   * Phase 4 Layer 1 - Governance & FinOps
+   */
+  async queryGovernanceSignals(query: {
+    signal_type?: string;
+    severity?: string;
+    risk_category?: string;
+    from_timestamp?: string;
+    to_timestamp?: string;
+    limit?: number;
+  }): Promise<{ signals: GovernanceSignal[]; total: number }> {
+    if (!this.enabled) {
+      return { signals: [], total: 0 };
+    }
+
+    try {
+      const response = await this.client.get<{ signals: GovernanceSignal[]; total: number }>(
+        '/api/v1/governance-signals',
+        { params: query }
+      );
+      return response.data;
+    } catch (error) {
+      return this.handleError(error, 'queryGovernanceSignals', { signals: [], total: 0 });
     }
   }
 

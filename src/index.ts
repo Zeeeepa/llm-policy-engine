@@ -26,6 +26,23 @@ export { config } from './utils/config';
 export { default as logger } from './utils/logger';
 export * from './utils/errors';
 
+// Phase 4 Layer 1 - Governance & FinOps exports
+export * from './governance';
+export {
+  governanceSignalEmitter,
+  GovernanceSignalEmitter,
+} from './governance/emitters/governance-signal-emitter';
+export {
+  GovernanceSignalType,
+  CostRiskSignal,
+  BudgetThresholdSignal,
+  PolicyViolationSignal,
+  ApprovalRequiredSignal,
+  GovernanceSignal,
+  PERFORMANCE_BUDGETS,
+  validatePerformanceBudget,
+} from './governance/contracts/governance-signals';
+
 // Main policy engine service
 import { PolicyEngine } from './core/engine/policy-engine';
 import { PolicyRepository } from './db/models/policy-repository';

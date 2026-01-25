@@ -142,21 +142,29 @@ export async function startAPIServer(port?: number): Promise<void> {
   const serverPort = port || config.server.port;
 
   try {
-    const dbHealthy = await db.ping();
-    if (!dbHealthy) {
-      logger.error('Database connection failed. Exiting...');
-      process.exit(1);
-    }
-
+    // Start server first (Cloud Run health check needs this)
     const server = app.listen(serverPort, () => {
       logger.info(
         {
           port: serverPort,
           host: config.server.host,
           env: config.nodeEnv,
+          phase: process.env.AGENT_PHASE || 'unknown',
+          layer: process.env.AGENT_LAYER || 'unknown',
         },
         'API server started',
       );
+    });
+
+    // Check database connection async (don't block startup)
+    db.ping().then(dbHealthy => {
+      if (!dbHealthy) {
+        logger.warn('Database connection not available - running in degraded mode');
+      } else {
+        logger.info('Database connection established');
+      }
+    }).catch(err => {
+      logger.warn({ error: err }, 'Database connection check failed - running in degraded mode');
     });
 
     const gracefulShutdown = async (signal: string) => {
